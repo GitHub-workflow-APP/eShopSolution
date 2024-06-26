@@ -1,0 +1,65 @@
+name: .NET Build Artifact
+
+run-name: .NET Build Artifact
+
+on:
+  repository_dispatch:
+    types: [vulnado-build]
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    name: register
+    steps:
+      - name: Register build-1
+        id: register-build-1
+        uses: veracode/github-actions-integration-helper@main
+        with:
+          action: registerBuild
+          token: ${{ github.event.client_payload.token }}
+          appname: ${{ github.event.client_payload.user_config.profile_name }}
+          source_repository: ${{ github.event.client_payload.repository.full_name }}
+          check_run_id: ${{ github.run_id }}
+          check_run_name: ${{ github.workflow }}
+          head_sha: ${{ github.event.client_payload.sha }}
+          event_type: ${{ github.event.client_payload.event_type }}
+          branch: ${{ github.event.client_payload.user_config.sandbox_scan.branch }}
+          issue_trigger_flow: ${{ github.event.client_payload.user_config.issue_trigger_flow }}
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ github.event.client_payload.repository.full_name }}
+        ref: ${{ github.event.client_payload.sha }}
+        token: ${{ github.event.client_payload.token }}
+    - uses: actions/checkout@v4
+      with:
+        path: 'veracode-helper'
+    - uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '7.0.x' # Adjust to your required .NET version
+    - name: Cache .NET packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build the project
+      run: dotnet build --configuration Release --no-restore
+    - name: Run tests
+      run: dotnet test --no-build --verbosity normal
+    - name: Package the application
+      env:
+        VERACODE_API_KEY_ID: '${{ secrets.VERACODE_API_ID }}'
+        VERACODE_API_KEY_SECRET: '${{ secrets.VERACODE_API_KEY }}'
+      run: |
+        cd /home/runner/work/vulnado/vulnado/
+        dotnet publish --configuration Release --output veracode-artifacts
+        zip -r veracode-artifact.zip veracode-artifacts
+    - uses: actions/upload-artifact@v4
+      with:
+        name: veracode-artifact
+        path: veracode-artifact.zip
